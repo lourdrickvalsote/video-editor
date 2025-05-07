@@ -3,24 +3,62 @@ from moviepy import VideoFileClip, TextClip, CompositeVideoClip, video
 import tempfile
 import os
 import zipfile
+import random
 
-st.set_page_config(page_title="🎬 Batch Video Editor with Effects", layout="centered")
-st.title("🎥 Upload, Paste Parameters, Auto-Generate Clips (MoviePy 2.1.2)")
+st.set_page_config(page_title="🎬 Auto Video Editor", layout="centered")
+st.title("🎥 Auto Video Editor")
 
+# Upload video
 video_file = st.file_uploader("Upload a video", type=["mp4", "mov", "avi", "mkv"])
 
-if video_file:
+if video_file:  # video has been uploaded
     st.video(video_file)
+
+    # Load the video temporarily to get duration
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_vid:
+        temp_vid.write(video_file.read())
+        temp_video_path = temp_vid.name
+
+    video_clip = VideoFileClip(temp_video_path)
+    video_duration = video_clip.duration
+    video_clip.close()
+
+    # Initialize default clip timings in session state
+    if "clip_timings_text" not in st.session_state:
+        st.session_state.clip_timings_text = "0, 5\n10, 15\n20, 25"
 
     st.markdown("### 📋 Paste Clip Timings")
     st.markdown("Each line: `start_time,end_time` (seconds)")
     st.code("0, 5\n10, 15\n20, 25")
-    clip_timings_text = st.text_area("Clip Timings", value="1, 5\n0, 5\n0, 5")
+    clip_timings_text = st.text_area("Clip Timings", value=st.session_state.clip_timings_text)
 
-    st.markdown("### ⏩ Paste Speed Multipliers (Optional)")
+    # Randomize timings button
+    if st.button("🎲 Randomize Timings"):
+        num_clips = 3  # You can change this or make it dynamic
+        randomized = []
+        for _ in range(num_clips):
+            start = round(random.uniform(0, video_duration - 1), 2)
+            end = round(random.uniform(start + 0.5, video_duration), 2)
+            randomized.append(f"{start}, {end}")
+        st.session_state.clip_timings_text = "\n".join(randomized)
+
+    # Initialize default clip speeds in session state
+    if "speed_multipliers_text" not in st.session_state:
+        st.session_state.speed_multipliers_text = "1.0\n1.5\n2.0"
+
+    st.markdown("### ⏩ Paste Speed Multipliers")
     st.markdown("Each line: `1.0` (normal), `2.0` (2x faster), `0.5` (half speed)")
     st.code("1.0\n2.0\n0.5")
-    speed_multipliers_text = st.text_area("Speed Multipliers", value="1.0\n1.5\n1.0")
+    speed_multipliers_text = st.text_area("Speed Multipliers", value=st.session_state.speed_multipliers_text)
+    
+    # Randomize speeds button
+    if st.button("🎲 Randomize Speeds"):
+        num_clips = 3  # You can change this or make it dynamic
+        randomized = []
+        for _ in range(num_clips):
+            speed = round(random.weibullvariate(1.6, 2), 2)
+            randomized.append(f"{speed}")
+        st.session_state.speed_multipliers_text = "\n".join(randomized)
 
     st.markdown("### 🖋️ Paste Overlay Texts")
     st.markdown("Each line = custom text for that clip.")
@@ -89,12 +127,21 @@ if video_file:
             if speed != 1.0:
                 subclip = subclip.with_effects([video.fx.MultiplySpeed(speed)])
 
-            # subclip = subclip.with_effects([video.fx.Resize(1080,1920)])
-
             # Add overlay text if needed
             if overlay_text.strip() != "":
                 try:
-                    txt_clip = TextClip(font="Mark Simonson - Proxima Nova Semibold-webfont", text=overlay_texts[i], font_size=80, color='white', stroke_color="black", stroke_width=5, duration=subclip.duration, margin=(5,5), method='caption', size=(round(subclip.size[0] * 0.8), None), text_align='center').with_position(("center", "center"))
+                    txt_clip = TextClip(
+                        font="Mark Simonson - Proxima Nova Semibold-webfont",
+                        text=overlay_texts[i],
+                        font_size=80,
+                        color='white',
+                        stroke_color="black",
+                        stroke_width=5,
+                        duration=subclip.duration,
+                        margin=(5,5),
+                        method='caption',
+                        size=(round(subclip.size[0] * 0.8), None),
+                        text_align='center').with_position(("center", "center"))
                     subclip = CompositeVideoClip([subclip, txt_clip])
                 except Exception as e:
                     st.warning(f"⚠️ Could not add text overlay for clip {i+1}: {e}")
