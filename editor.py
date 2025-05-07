@@ -4,172 +4,197 @@ import tempfile
 import os
 import zipfile
 import random
+from pathlib import Path
+import time
 
 st.set_page_config(page_title="🎬 Auto Video Editor", layout="centered")
 st.title("🎥 Auto Video Editor")
 
-# Upload video
-video_file = st.file_uploader("Upload a video", type=["mp4", "mov", "avi", "mkv"])
+# Track how many upload groups there are
+if "upload_group_count" not in st.session_state:
+    st.session_state.upload_group_count = 2
 
-if video_file:  # video has been uploaded
-    st.video(video_file)
+if st.button("➕ Add More Upload Groups"):
+    st.session_state.upload_group_count += 1
 
-    # Load the video temporarily to get duration
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_vid:
-        temp_vid.write(video_file.read())
-        temp_video_path = temp_vid.name
+if "cancel_generation" not in st.session_state:
+    st.session_state.cancel_generation = False
 
-    video_clip = VideoFileClip(temp_video_path)
-    video_duration = video_clip.duration
-    video_clip.close()
+# Set number of output videos
+num_videos_to_generate = st.number_input("How many combined videos do you want to generate?", min_value=1, max_value=100, value=3, step=1)
 
-    # Initialize default clip timings in session state
-    if "clip_timings_text" not in st.session_state:
-        st.session_state.clip_timings_text = "0, 5\n10, 15\n20, 25"
+# Upload videos dynamically
+video_inputs = []
+for i in range(st.session_state.upload_group_count):
+    label = f"Group {i+1}"
+    files = st.file_uploader(f"Upload one or more videos for {label}", type=["mp4", "mov", "avi", "mkv"], accept_multiple_files=True, key=f"uploader_{i}")
+    video_inputs.append((label, files))
 
-    st.markdown("### 📋 Paste Clip Timings")
-    st.markdown("Each line: `start_time,end_time` (seconds)")
-    st.code("0, 5\n10, 15\n20, 25")
-    clip_timings_text = st.text_area("Clip Timings", value=st.session_state.clip_timings_text)
+video_params = {}
 
-    # Randomize timings button
-    if st.button("🎲 Randomize Timings"):
-        num_clips = 3  # You can change this or make it dynamic
-        randomized = []
-        for _ in range(num_clips):
-            start = round(random.uniform(0, video_duration - 1), 2)
-            end = round(random.uniform(start + 0.5, video_duration), 2)
-            randomized.append(f"{start}, {end}")
-        st.session_state.clip_timings_text = "\n".join(randomized)
+for label, files in video_inputs:
+    if files:
+        temp_paths = []
+        durations = []
+        for file in files:
+            file.seek(0)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_vid:
+                temp_vid.write(file.read())
+                temp_paths.append(temp_vid.name)
+                clip = VideoFileClip(temp_vid.name)
+                durations.append(clip.duration)
+                clip.close()
 
-    # Initialize default clip speeds in session state
-    if "speed_multipliers_text" not in st.session_state:
-        st.session_state.speed_multipliers_text = "1.0\n1.5\n2.0"
+        key_prefix = f"{label.lower()}_"
 
-    st.markdown("### ⏩ Paste Speed Multipliers")
-    st.markdown("Each line: `1.0` (normal), `2.0` (2x faster), `0.5` (half speed)")
-    st.code("1.0\n2.0\n0.5")
-    speed_multipliers_text = st.text_area("Speed Multipliers", value=st.session_state.speed_multipliers_text)
-    
-    # Randomize speeds button
-    if st.button("🎲 Randomize Speeds"):
-        num_clips = 3  # You can change this or make it dynamic
-        randomized = []
-        for _ in range(num_clips):
-            speed = round(random.weibullvariate(1.6, 2), 2)
-            randomized.append(f"{speed}")
-        st.session_state.speed_multipliers_text = "\n".join(randomized)
+        if key_prefix + "clip_timings_text" not in st.session_state or len(st.session_state[key_prefix + "clip_timings_text"].splitlines()) != num_videos_to_generate:
+            duration = random.choice(durations)
+            timings = []
+            for _ in range(num_videos_to_generate):
+                start = round(random.uniform(0, duration - 1), 2)
+                end = round(random.uniform(start + 0.5, duration), 2)
+                timings.append(f"{start}, {end}")
+            st.session_state[key_prefix + "clip_timings_text"] = "\n".join(timings)
 
-    st.markdown("### 🖋️ Paste Overlay Texts")
-    st.markdown("Each line = custom text for that clip.")
-    st.code("First Clip\nSecond Clip\nThird Clip")
-    overlay_texts_text = st.text_area("Overlay Texts Per Clip", value="Clip 1 is a test to see if captions get moved down automatically hehehehe\nClip 2\nClip 3")
+        st.markdown(f"### 📋 {label} Clip Timings")
+        clip_timings_text = st.text_area(f"{label} Clip Timings", value=st.session_state[key_prefix + "clip_timings_text"], key=key_prefix + "timings")
 
-    if st.button("🚀 Generate Edited Clips"):
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_input:
-            temp_input.write(video_file.read())
-            temp_input_path = temp_input.name
+        if st.button(f"🎲 Randomize {label} Timings"):
+            randomized = []
+            duration = random.choice(durations)
+            for _ in range(num_videos_to_generate):
+                start = round(random.uniform(0, duration - 1), 2)
+                end = round(random.uniform(start + 0.5, duration), 2)
+                randomized.append(f"{start}, {end}")
+            st.session_state[key_prefix + "clip_timings_text"] = "\n".join(randomized)
 
-        # Parse clip timings
-        clip_timings = []
-        for line in clip_timings_text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        if key_prefix + "speed_multipliers_text" not in st.session_state or len(st.session_state[key_prefix + "speed_multipliers_text"].splitlines()) != num_videos_to_generate:
+            st.session_state[key_prefix + "speed_multipliers_text"] = "\n".join(["1.0"] * num_videos_to_generate)
+
+        st.markdown(f"### ⏩ {label} Speed Multipliers")
+        speed_multipliers_text = st.text_area(f"{label} Speed Multipliers", value=st.session_state[key_prefix + "speed_multipliers_text"], key=key_prefix + "speeds")
+
+        if st.button(f"🎲 Randomize {label} Speeds"):
+            randomized = []
+            for _ in range(num_videos_to_generate):
+                speed = round(random.weibullvariate(1.6, 2), 2)
+                randomized.append(f"{speed}")
+            st.session_state[key_prefix + "speed_multipliers_text"] = "\n".join(randomized)
+
+        if key_prefix + "overlay_texts" not in st.session_state or len(st.session_state[key_prefix + "overlay_texts"].splitlines()) != num_videos_to_generate:
+            st.session_state[key_prefix + "overlay_texts"] = "\n".join([f"Clip {i+1}" for i in range(num_videos_to_generate)])
+
+        st.markdown(f"### 🖋️ {label} Overlay Texts")
+        overlay_texts_text = st.text_area(f"{label} Overlay Texts Per Clip", value=st.session_state[key_prefix + "overlay_texts"], key=key_prefix + "overlay")
+
+        video_params[label] = {
+            "paths": temp_paths,
+            "durations": durations,
+            "timings": clip_timings_text,
+            "speeds": speed_multipliers_text,
+            "texts": [x.strip() for x in overlay_texts_text.splitlines()]
+        }
+
+# Combine all clips in order across all groups
+if st.button("🚀 Generate All Combined Clips"):
+    if st.session_state.get("cancel_generation", False):
+        st.warning("🚫 Generation canceled.")
+    else:
+        if st.button("🛑 Cancel Generation"):
+            st.session_state.cancel_generation = True
+
+    status_text = st.empty()
+    eta_text = st.empty()
+    progress_bar = st.progress(0)
+    start_time = time.time()
+
+    def parse_clips(data):
+        timings = []
+        for line in data["timings"].splitlines():
             try:
                 start_str, end_str = line.split(",")
-                start, end = float(start_str.strip()), float(end_str.strip())
-                clip_timings.append((start, end))
-            except Exception as e:
-                st.warning(f"Skipping invalid timing line: '{line}'. Error: {e}")
+                timings.append((float(start_str.strip()), float(end_str.strip())))
+            except:
+                pass
+        speeds = [float(x.strip()) for x in data["speeds"].splitlines() if x.strip()]
+        texts = data["texts"]
+        return timings, speeds, texts
 
-        # Parse speed multipliers
-        speed_multipliers = []
-        for line in speed_multipliers_text.splitlines():
-            line = line.strip()
-            if line == "":
-                continue
-            try:
-                speed = float(line)
-                speed_multipliers.append(speed)
-            except Exception as e:
-                st.warning(f"Skipping invalid speed line: '{line}'. Error: {e}")
+    combined_output_files = []
 
-        # Parse overlay texts
-        overlay_texts = [line.strip() for line in overlay_texts_text.splitlines()]
+    group_clips = {}
+    for label, data in video_params.items():
+        timings, speeds, texts = parse_clips(data)
+        group_clips[label] = {
+            "timings": timings,
+            "speeds": speeds,
+            "texts": texts
+        }
 
-        output_files = []
+    for i in range(num_videos_to_generate):
 
-        video_clip = VideoFileClip(temp_input_path).with_effects([video.fx.Resize([1080,1920])])
-        duration = video_clip.duration
-        video_clip.close()
+        status_text.markdown(f"⏳ Generating video {i+1} of {num_videos_to_generate}...")
+        clips_for_this_round = []
 
-        n = min(len(clip_timings), len(speed_multipliers))
+        if st.session_state.get("cancel_generation", False):
+            status_text.error("🚫 Canceled by user.")
 
-        for i in range(n):
-            start, end = clip_timings[i]
-            speed = speed_multipliers[i]
-            overlay_text = overlay_texts[i] if i < len(overlay_texts) else ""
+        elapsed = time.time() - start_time
+        avg_time = elapsed / (i + 1)
+        remaining = avg_time * (num_videos_to_generate - (i + 1))
 
-            if start >= end:
-                st.warning(f"Skipping clip {i+1}: Start ({start}) is not less than End ({end}).")
-                continue
-            if start < 0 or end > duration:
-                st.warning(f"Skipping clip {i+1}: Timings out of bounds (video is {duration:.2f}s).")
-                continue
+        eta_text.markdown(f"⏱️ Estimated time remaining: **{int(remaining)}s**")
+        progress_bar.progress(i / num_videos_to_generate)
+        status_text.markdown(f"⏳ Generating video {i+1} of {num_videos_to_generate}...")
 
-            st.write(f"✂️ Processing Clip {i+1}: {start}-{end}s at {speed}x speed")
+        for label, data in video_params.items():
+            status_text.markdown(f"🎬 Generating Video #{i+1}")
+            params = group_clips[label]
+            paths = data["paths"]
+            timing = params["timings"][i]
+            speed = params["speeds"][i]
+            text = params["texts"][i] if i < len(params["texts"]) else ""
 
-            clip = VideoFileClip(temp_input_path).with_effects([video.fx.Resize([1080,1920])])
-            subclip = clip.subclipped(start, end)
-
-            # Speed adjustment (simulate by changing duration)
+            selected_path = random.choice(paths)
+            clip = VideoFileClip(selected_path).subclipped(*timing).with_effects([video.fx.Resize([1080,1920])])
             if speed != 1.0:
-                subclip = subclip.with_effects([video.fx.MultiplySpeed(speed)])
+                clip = clip.with_duration(clip.duration / speed)
+            if text:
+                txt_overlay = TextClip(
+                    font="Mark Simonson - Proxima Nova Semibold-webfont",
+                    text=text,
+                    font_size=80,
+                    color='white',
+                    stroke_color="black",
+                    stroke_width=5,
+                    duration=clip.duration,
+                    margin=(5,5),
+                    method='caption',
+                    size=(round(clip.size[0] * 0.8), None),
+                    text_align='center'
+                ).with_position(("center", "center"))
+                clip = CompositeVideoClip([clip, txt_overlay])
+            clips_for_this_round.append(clip)
 
-            # Add overlay text if needed
-            if overlay_text.strip() != "":
-                try:
-                    txt_clip = TextClip(
-                        font="Mark Simonson - Proxima Nova Semibold-webfont",
-                        text=overlay_texts[i],
-                        font_size=80,
-                        color='white',
-                        stroke_color="black",
-                        stroke_width=5,
-                        duration=subclip.duration,
-                        margin=(5,5),
-                        method='caption',
-                        size=(round(subclip.size[0] * 0.8), None),
-                        text_align='center').with_position(("center", "center"))
-                    subclip = CompositeVideoClip([subclip, txt_clip])
-                except Exception as e:
-                    st.warning(f"⚠️ Could not add text overlay for clip {i+1}: {e}")
+        final_combined = video.compositing.CompositeVideoClip.concatenate_videoclips(clips_for_this_round)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_combined_{i+1}.mp4") as temp_output:
+            final_combined.write_videofile(temp_output.name, codec="libx264", audio_codec="aac")
+            combined_output_files.append(temp_output.name)
 
-            # Save subclip
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_start{int(start)}_end{int(end)}.mp4") as temp_output:
-                subclip.write_videofile(temp_output.name, codec="libx264", audio_codec="aac")
-                output_files.append(temp_output.name)
+    if combined_output_files:
+        zip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for file_path in combined_output_files:
+                zipf.write(file_path, arcname=os.path.basename(file_path))
 
-            clip.close()
+        with open(zip_path, "rb") as f:
+            st.download_button(
+                label="⬇️ Download All Combined Clips (ZIP)",
+                data=f,
+                file_name="combined_clips.zip",
+                mime="application/zip"
+            )
 
-        os.remove(temp_input_path)
-
-        # Package outputs
-        if output_files:
-            zip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for file_path in output_files:
-                    zipf.write(file_path, arcname=os.path.basename(file_path))
-
-            with open(zip_path, "rb") as f:
-                st.download_button(
-                    label="⬇️ Download All Clips (ZIP)",
-                    data=f,
-                    file_name="edited_clips.zip",
-                    mime="application/zip"
-                )
-
-            st.success(f"✅ Successfully generated {len(output_files)} clip(s)!")
-        else:
-            st.error("❌ No valid clips generated. Check timings and speeds.")
+        progress_bar.progress(1.0)
+        st.success(f"✅ Successfully generated {len(combined_output_files)} combined clip(s)!")
+        st.session_state.cancel_generation = False
