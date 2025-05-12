@@ -478,6 +478,7 @@ def create_download_zip(output_files):
     except Exception as e:
         st.error(f"Error creating ZIP file: {str(e)}")
 
+
 # === Main Application ===
 def main():
     initialize_app()
